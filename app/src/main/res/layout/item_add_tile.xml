@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.robert.mybank.activityproduct.SquareFrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="8dp">
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardAdd"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="2dp"
+        android:alpha="0.6"
+        android:backgroundTint="#BDBDBD">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="+"
+            android:textColor="#424242"
+            android:textSize="42sp"
+            android:textStyle="bold" />
+    </com.google.android.material.card.MaterialCardView>
+
+</com.robert.mybank.activityproduct.SquareFrameLayout>

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="20dp"
+        android:orientation="vertical">
+
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnModeLogin"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Войти"/>
+
+            <Button
+                android:id="@+id/btnModeRegister"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Регистрация"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/loginBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="16dp">
+
+            <EditText
+                android:id="@+id/etLoginEmail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Почта"
+                android:inputType="textEmailAddress"/>
+
+            <EditText
+                android:id="@+id/etLoginPassword"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Пароль"
+                android:inputType="textPassword"
+                android:layout_marginTop="10dp"/>
+
+            <Button
+                android:id="@+id/btnLogin"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Войти"
+                android:layout_marginTop="12dp"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/registerBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="16dp">
+
+            <EditText
+                android:id="@+id/etRegName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Имя"
+                android:inputType="textPersonName"/>
+
+            <EditText
+                android:id="@+id/etRegEmail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Почта"
+                android:inputType="textEmailAddress"
+                android:layout_marginTop="10dp"/>
+
+            <EditText
+                android:id="@+id/etRegPassword"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Пароль"
+                android:inputType="textPassword"
+                android:layout_marginTop="10dp"/>
+
+            <Button
+                android:id="@+id/btnRegister"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Зарегистрироваться"
+                android:layout_marginTop="12dp"/>
+        </LinearLayout>
+
+       <LinearLayout
+            android:id="@+id/codeBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="16dp">
+
+            <EditText
+                android:id="@+id/etCode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Введите 4-значный код"
+                android:inputType="number"
+                android:maxLength="4"/>
+
+            <Button
+                android:id="@+id/btnConfirmCode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Подтвердить код"
+                android:layout_marginTop="12dp"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
