@@ -7,11 +7,13 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
 import com.robert.mybank.R
+import com.robert.mybank.server.*
 
 class CategoriesAdapter(
-    private val getCategories: () -> List<String>,
+    private val getCategories: () -> List<CategoryDto>,
     private val getColor: (index: Int) -> Int,
-    private val onCategoryClick: (String) -> Unit,
+    private val onCategoryClick: (CategoryDto) -> Unit,
+    private val onCategoryLongClick: (CategoryDto) -> Unit,
     private val onAddClick: () -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -38,10 +40,14 @@ class CategoriesAdapter(
         if (holder is AddVH) {
             holder.itemView.setOnClickListener { onAddClick() }
         } else if (holder is CategoryVH) {
-            val name = getCategories()[position]
-            holder.tvName.text = name
+            val item = getCategories()[position]
+            holder.tvName.text = item.name
             holder.card.setCardBackgroundColor(getColor(position))
-            holder.itemView.setOnClickListener { onCategoryClick(name) }
+            holder.itemView.setOnClickListener { onCategoryClick(item) }
+            holder.itemView.setOnLongClickListener {
+                onCategoryLongClick(item)
+                true
+            }
         }
     }
 

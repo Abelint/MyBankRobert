@@ -28,4 +28,17 @@ interface ApiService {
         @Header("Authorization") bearer: String,
         @Path("id") id: Int
     ): ApiOkResponse
+
+    @GET("records")
+    suspend fun getRecords(
+        @Header("Authorization") bearer: String,
+        @Query("date") date: String
+    ): RecordsResponse
+
+    @POST("records")
+    suspend fun createRecords(
+        @Header("Authorization") bearer: String,
+        @Body body: CreateRecordsRequest
+    ): CreateRecordsResponse
+
 }
