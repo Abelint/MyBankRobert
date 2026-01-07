@@ -46,14 +46,139 @@ class ActivityProduct : AppCompatActivity() {
             getColor = { index -> palette[index % palette.size] },
             onCategoryClick = { cat -> openEntriesSheet(cat) },
             onCategoryLongClick = { cat -> showDeleteDialog(cat) },
+            onIncomeClick = { openIncomeSheet() },
             onAddClick = { showAddCategoryDialog() }
         )
-
         rvCategories.layoutManager = GridLayoutManager(this, 2)
         rvCategories.adapter = categoriesAdapter
 
         loadCategories()
     }
+
+    private fun openIncomeSheet() {
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(R.layout.bottom_sheet_entries)
+
+        val tvTitle = dialog.findViewById<TextView>(R.id.tvSheetTitle)
+        val rv = dialog.findViewById<RecyclerView>(R.id.rvEntries)
+
+        tvTitle?.text = "Доход"
+        if (rv == null) { dialog.show(); return }
+
+        val day = intent.getStringExtra("date") ?: ""
+        if (day.isBlank()) { Toast.makeText(this, "Нет даты", Toast.LENGTH_SHORT).show(); dialog.show(); return }
+
+        val entries = mutableListOf<Entry>()
+        rv.layoutManager = LinearLayoutManager(this)
+
+        // снимок исходных значений по id (чтобы понять, что изменилось)
+        val originalById = mutableMapOf<Int, Pair<String, String>>() // id -> (title, amountStr)
+
+        lateinit var adapter: EntriesAdapter
+        adapter = EntriesAdapter(entries) {
+            val last = entries.lastOrNull()
+            val lastFilled = last != null && last.name.isNotBlank() && last.value.isNotBlank()
+            if (lastFilled) {
+                entries.add(Entry("", "", null))
+                adapter.notifyItemInserted(entries.size - 1)
+            }
+        }
+        rv.adapter = adapter
+
+        // LOAD
+        uiScope.launch {
+            try {
+                val res = withContext(Dispatchers.IO) { ApiClient.api.getIncome(bearer(), day) }
+                if (!res.ok) {
+                    Toast.makeText(this@ActivityProduct, "Ошибка загрузки: ${res.error}", Toast.LENGTH_SHORT).show()
+                } else {
+                    entries.clear()
+                    originalById.clear()
+
+                    res.items.sortedBy { it.date }.forEach { inc ->
+                        val e = Entry(inc.title, inc.amount.toString(), inc.id)
+                        entries.add(e)
+                        originalById[inc.id] = Pair(inc.title, inc.amount.toString())
+                    }
+
+                    // пустая строка
+                    entries.add(Entry("", "", null))
+                    adapter.notifyDataSetChanged()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@ActivityProduct, "Сеть/сервер: ${e.message}", Toast.LENGTH_LONG).show()
+                if (entries.isEmpty()) { entries.add(Entry("", "", null)); adapter.notifyDataSetChanged() }
+            }
+        }
+
+        // SAVE on dismiss
+        dialog.setOnDismissListener {
+            val filled = entries.filter { it.name.isNotBlank() && it.value.isNotBlank() }
+
+            // 1) NEW -> POST batch
+            val newItems = filled.filter { it.id == null }.mapNotNull { row ->
+                val amount = row.value.replace(",", ".").toDoubleOrNull() ?: return@mapNotNull null
+                IncomeItemIn(
+                    title = row.name.trim(),
+                    amount = amount,
+                    date = buildDateTimeForDay(day)
+                )
+            }
+
+            // 2) UPDATED -> PUT per id
+            val updates = filled.filter { it.id != null }.mapNotNull { row ->
+                val id = row.id ?: return@mapNotNull null
+                val old = originalById[id] ?: return@mapNotNull null
+
+                val newTitle = row.name.trim()
+                val newAmountStr = row.value.trim()
+                if (newTitle == old.first && newAmountStr == old.second) return@mapNotNull null
+
+                val newAmount = newAmountStr.replace(",", ".").toDoubleOrNull() ?: return@mapNotNull null
+
+                Triple(id, newTitle, newAmount)
+            }
+
+            if (newItems.isEmpty() && updates.isEmpty()) return@setOnDismissListener
+
+            uiScope.launch {
+                try {
+                    // сначала добавим новые
+                    if (newItems.isNotEmpty()) {
+                        val r = withContext(Dispatchers.IO) {
+                            ApiClient.api.createIncome(bearer(), IncomeCreateRequest(newItems))
+                        }
+                        if (!r.ok) {
+                            Toast.makeText(this@ActivityProduct, "Ошибка дохода: ${r.error}", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+                    }
+
+                    // потом обновим изменённые
+                    for ((id, title, amount) in updates) {
+                        val r = withContext(Dispatchers.IO) {
+                            ApiClient.api.updateIncome(
+                                bearer(),
+                                id,
+                                IncomeUpdateRequest(title = title, amount = amount)
+                            )
+                        }
+                        if (!r.ok) {
+                            Toast.makeText(this@ActivityProduct, "Ошибка обновления дохода id=$id: ${r.error}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+
+                    Toast.makeText(this@ActivityProduct, "Доход сохранён", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this@ActivityProduct, "Сеть/сервер (доход): ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+
     private fun showDeleteDialog(cat: CategoryDto) {
         AlertDialog.Builder(this)
             .setTitle("Удаление категории")

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <EditText
+        android:id="@+id/etTargetName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Название цели"
+        android:inputType="text" />
+
+    <EditText
+        android:id="@+id/etTargetCost"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Сумма (например 120000)"
+        android:inputType="numberDecimal"
+        android:layout_marginTop="12dp"/>
+
+    <TextView
+        android:id="@+id/tvTargetHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Активная цель может быть только одна."
+        android:layout_marginTop="10dp"/>
+</LinearLayout>

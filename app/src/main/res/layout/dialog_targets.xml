@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- type=1 Накопление (синий) -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1) Накопление (синий)"
+            android:textStyle="bold"/>
+
+        <EditText
+            android:id="@+id/etT1Name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Например: Кипр"
+            android:inputType="text"/>
+
+        <EditText
+            android:id="@+id/etT1Cost"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Сумма цели (например 150000)"
+            android:inputType="numberDecimal"
+            android:layout_marginTop="8dp"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="16dp"/>
+
+        <!-- type=2 Расход (красный) -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2) Расходы за месяц (красный)"
+            android:textStyle="bold"/>
+
+        <EditText
+            android:id="@+id/etT2Name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Например: Не более 30000"
+            android:inputType="text"/>
+
+        <EditText
+            android:id="@+id/etT2Cost"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Лимит расходов за месяц"
+            android:inputType="numberDecimal"
+            android:layout_marginTop="8dp"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="16dp"/>
+
+        <!-- type=3 Доход (жёлтый/зелёный) -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="3) Доход за месяц (жёлтый)"
+            android:textStyle="bold"/>
+
+        <EditText
+            android:id="@+id/etT3Name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Например: Доход 50000"
+            android:inputType="text"/>
+
+        <EditText
+            android:id="@+id/etT3Cost"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Цель дохода за месяц"
+            android:inputType="numberDecimal"
+            android:layout_marginTop="8dp"/>
+
+        <TextView
+            android:id="@+id/tvTargetHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Можно заполнить 1–3 цели. Пустые поля — цель не задаётся."
+            android:layout_marginTop="12dp"/>
+
+    </LinearLayout>
+</ScrollView>

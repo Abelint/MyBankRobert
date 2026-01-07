@@ -35,8 +35,9 @@ class RingsChartView @JvmOverloads constructor(
     private val middlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
-        color = 0xFF34C759.toInt() // зелёный
+        color = 0xFFFFCC00.toInt() // жёлтый
     }
+
 
     private val innerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE

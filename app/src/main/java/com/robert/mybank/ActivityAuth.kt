@@ -9,6 +9,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +47,16 @@ class ActivityAuth : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_auth)
+
+        onBackPressedDispatcher.addCallback(this) {
+            // если пользователь НЕ авторизован — закрываем приложение
+            if (TokenStore.token(this@ActivityAuth).isNullOrBlank()) {
+                finishAffinity()
+            } else {
+                // если вдруг авторизован — можно закрыть как обычно
+                finish()
+            }
+        }
 
         btnModeLogin = findViewById(R.id.btnModeLogin)
         btnModeRegister = findViewById(R.id.btnModeRegister)
@@ -212,8 +223,9 @@ class ActivityAuth : AppCompatActivity() {
     }
 
     private fun goNext() {
-        // сюда поставь нужную Activity
-        //startActivity(Intent(this, MainActivity::class.java))
+        val intent = Intent(this, MainActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        startActivity(intent)
         finish()
     }
 
@@ -240,4 +252,5 @@ class ActivityAuth : AppCompatActivity() {
     private fun isValidEmail(email: String): Boolean {
         return Patterns.EMAIL_ADDRESS.matcher(email).matches()
     }
+
 }
