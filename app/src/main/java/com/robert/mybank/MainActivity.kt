@@ -19,12 +19,42 @@ import java.util.*
 import android.widget.TextView
 import java.math.BigDecimal
 import java.math.RoundingMode
+import android.Manifest
+import android.content.pm.PackageManager
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.util.Log
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
+    private var voiceEnabled = true
+
+    private var resumeStartRunnable: Runnable? = null
+    private var restartRunnable: Runnable? = null
+
+    private val voiceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var restartPosted = false
+    private val restartDelayMs = 1500L
+    private var isTargetsDialogVisible = false
+    private val REQ_AUDIO = 101
+
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var speechIntent: Intent? = null
+
+    // чтобы не открывать диалог 10 раз подряд
+    private var lastVoiceTriggerAt = 0L
+    private val voiceCooldownMs = 2000L
+
+    private var isListening = false
+
     private lateinit var tvLegendOuter: TextView // расход (красный)
     private lateinit var tvLegendMiddle: TextView // доход (зелёный)
     private lateinit var tvLegendInner: TextView // накопление (синий)
     private lateinit var ringsChart: RingsChartView
+    private lateinit var calendarView: CalendarView
+
     private val uiScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // выбранная дата календаря, если была
@@ -60,7 +90,7 @@ class MainActivity : AppCompatActivity() {
             showTargetsDialog()
         }
 
-        val calendarView = findViewById<CalendarView>(R.id.calendarView)
+        calendarView = findViewById<CalendarView>(R.id.calendarView)
         selectedDateStr = todayStr()
 
         calendarView.setOnDateChangeListener { _, year, month, dayOfMonth ->
@@ -76,20 +106,64 @@ class MainActivity : AppCompatActivity() {
             refreshRingsForMonth(monthParamFromDate(dateStr))
         }
 
+        initVoiceControl()
+        ensureAudioPermissionAndStart()
+
+
         // первичная загрузка (текущий месяц)
         refreshRingsForMonth(currentMonthParam())
     }
 
     override fun onResume() {
         super.onResume()
-        // когда вернулись из ActivityProduct (доходы/расходы могли поменяться)
         refreshRingsForMonth(currentMonthParam())
+
+        voiceEnabled = true
+
+        resumeStartRunnable?.let { voiceHandler.removeCallbacks(it) }
+        val r = Runnable { ensureAudioPermissionAndStart() }
+        resumeStartRunnable = r
+        voiceHandler.postDelayed(r, 1200L)
     }
+
+
+    override fun onPause() {
+        super.onPause()
+        voiceEnabled = false
+
+        resumeStartRunnable?.let { voiceHandler.removeCallbacks(it) }
+        resumeStartRunnable = null
+
+        restartRunnable?.let { voiceHandler.removeCallbacks(it) }
+        restartRunnable = null
+
+        voiceHandler.removeCallbacksAndMessages(null) // ВАЖНО: сносит и onError-postDelayed
+        stopVoiceListening()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        voiceEnabled = false
+
+        resumeStartRunnable?.let { voiceHandler.removeCallbacks(it) }
+        resumeStartRunnable = null
+
+        restartRunnable?.let { voiceHandler.removeCallbacks(it) }
+        restartRunnable = null
+
+        voiceHandler.removeCallbacksAndMessages(null)
+        stopVoiceListening()
+    }
+
 
     override fun onDestroy() {
         super.onDestroy()
+        stopVoiceListening()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
         uiScope.cancel()
     }
+
 
     // =========================
     // Summary -> Rings
@@ -286,8 +360,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-
+            isTargetsDialogVisible = true
+            stopVoiceListening() // чтобы не слушал во время ввода
             dialog.show()
+            dialog.setOnDismissListener {
+                isTargetsDialogVisible = false
+                handlerPostRestartListening()
+            }
         }
     }
 
@@ -322,4 +401,303 @@ class MainActivity : AppCompatActivity() {
             String.format("%02d.%04d", mm, yyyy)
         }
     }
+
+    private fun initVoiceControl() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            // на некоторых девайсах/эмуляторах нет сервиса распознавания
+            Toast.makeText(this, "Распознавание речи недоступно на устройстве", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+
+        speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+
+            override fun onError(error: Int) {
+                isListening = false
+
+                // Частые ошибки:
+                // ERROR_NO_MATCH / ERROR_SPEECH_TIMEOUT — это "ничего не сказал", просто мягко рестартим
+                // ERROR_RECOGNIZER_BUSY — не трогаем, дадим остыть
+                // остальные — тоже мягко рестартим
+
+                if (!voiceEnabled) return
+
+                if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    handlerPostRestartListening(2500L)
+                    return
+                }
+                handlerPostRestartListening(800L)
+
+            }
+
+
+            override fun onResults(results: Bundle?) {
+                isListening = false
+                handleSpeechResults(results)
+                handlerPostRestartListening()
+            }
+
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                // можно реагировать уже на частичные результаты
+               // handleSpeechResults(partialResults)
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+
+    private fun handleSpeechResults(bundle: Bundle?) {
+        val list = bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+        val text = (list.firstOrNull() ?: "").lowercase(Locale.getDefault())
+
+        // 1) если в фразе есть “седьмое / 7 / двадцать первое” — выберем день на календаре
+        val day = extractDayOfMonth(text)
+        if (day != null) {
+            selectDayOnCalendar(day) // визуально выделит день + обновит selectedDateStr + диаграмму
+        }
+
+        // 2) “цель” — открыть диалог целей (у тебя уже работает)
+        if (text.contains("цель")) {
+            val now = System.currentTimeMillis()
+            if (now - lastVoiceTriggerAt >= voiceCooldownMs) {
+                lastVoiceTriggerAt = now
+                showTargetsDialog()
+            }
+            return
+        }
+
+        // 3) “записать” — открыть ActivityProduct на текущую выбранную дату календаря
+        if (text.contains("записать")) {
+            val now = System.currentTimeMillis()
+            if (now - lastVoiceTriggerAt >= voiceCooldownMs) {
+                lastVoiceTriggerAt = now
+                openActivityProductForSelectedDate()
+            }
+            return
+        }
+
+        // (необязательно) быстрые команды
+        if (text.contains("сегодня")) {
+            val now = Calendar.getInstance()
+            setCalendarToDate(now)
+            return
+        }
+        if (text.contains("завтра")) {
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.DAY_OF_MONTH, 1)
+            setCalendarToDate(cal)
+            return
+        }
+        if (text.contains("вчера")) {
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.DAY_OF_MONTH, -1)
+            setCalendarToDate(cal)
+            return
+        }
+    }
+
+
+    private fun ensureAudioPermissionAndStart() {
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+
+        if (granted) {
+            startVoiceListening()
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                REQ_AUDIO
+            )
+        }
+    }
+
+    private fun startVoiceListening() {
+        if (!voiceEnabled) return
+        if (isTargetsDialogVisible) return
+        if (isListening) return
+
+        Log.d("VOICE", "START in MainActivity")
+
+        val sr = speechRecognizer ?: return
+        val intent = speechIntent ?: return
+
+        try {
+            isListening = true
+            sr.startListening(intent)
+        } catch (_: Throwable) {
+            isListening = false
+            handlerPostRestartListening()
+        }
+    }
+
+
+
+    private fun stopVoiceListening() {
+        Log.d("VOICE", "stopVoiceListening in MainActivity")
+        try {
+            isListening = false
+            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+        } catch (_: Throwable) {}
+    }
+
+    private fun handlerPostRestartListening(delayMs: Long = 400L) {
+        if (!voiceEnabled) return
+
+        restartRunnable?.let { voiceHandler.removeCallbacks(it) }
+
+        val r = Runnable {
+            if (!isFinishing && !isDestroyed) startVoiceListening()
+        }
+        restartRunnable = r
+        voiceHandler.postDelayed(r, delayMs)
+    }
+
+
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode == REQ_AUDIO) {
+            val ok = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (ok) {
+                startVoiceListening()
+            } else {
+                Toast.makeText(this, "Микрофон не разрешён — голосовое управление выключено", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun openActivityProductForSelectedDate() {
+        // берем то, что сейчас выбрано (или текущую дату)
+        val dateStr = selectedDateStr ?: todayStr()
+
+        val intent = Intent(this, ActivityProduct::class.java)
+        intent.putExtra("date", dateStr)
+        startActivity(intent)
+    }
+
+    private fun selectDayOnCalendar(day: Int) {
+        // Берём текущую дату календаря (она всегда есть), меняем только день месяца
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = calendarView.date
+
+        // clamp: если сказали 31, а месяц короче — поставим последний день месяца
+        val maxDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+        val safeDay = day.coerceIn(1, maxDay)
+
+        cal.set(Calendar.DAY_OF_MONTH, safeDay)
+
+        // ВАЖНО: этот set визуально “выделяет” дату на CalendarView
+        calendarView.date = cal.timeInMillis
+
+        // обновим selectedDateStr
+        val yyyy = cal.get(Calendar.YEAR)
+        val mm = cal.get(Calendar.MONTH) + 1
+        val dd = cal.get(Calendar.DAY_OF_MONTH)
+        val dateStr = String.format("%04d-%02d-%02d", yyyy, mm, dd)
+        selectedDateStr = dateStr
+
+        // и обновим диаграмму под месяц выбранного дня
+        refreshRingsForMonth(monthParamFromDate(dateStr))
+    }
+
+    private fun setCalendarToDate(cal: Calendar) {
+        calendarView.date = cal.timeInMillis
+
+        val yyyy = cal.get(Calendar.YEAR)
+        val mm = cal.get(Calendar.MONTH) + 1
+        val dd = cal.get(Calendar.DAY_OF_MONTH)
+        val dateStr = String.format("%04d-%02d-%02d", yyyy, mm, dd)
+        selectedDateStr = dateStr
+
+        refreshRingsForMonth(monthParamFromDate(dateStr))
+    }
+    private fun extractDayOfMonth(text: String): Int? {
+        // 1) сначала цифры: "7", "07", "31"
+        val m = Regex("""\b(0?[1-9]|[12]\d|3[01])\b""").find(text)
+        if (m != null) {
+            val v = m.groupValues[1].toIntOrNull()
+            if (v != null && v in 1..31) return v
+        }
+
+        // 2) слова (важно: длинные фразы — раньше, чтобы "тридцать первое" не схватилось как "первое")
+        val map = listOf(
+            "тридцать первое" to 31,
+            "тридцать первое число" to 31,
+            "тридцать" to 30, // иногда говорят "тридцатое", но распознавание может дать "тридцать"
+            "тридцатое" to 30,
+
+            "двадцать девятое" to 29,
+            "двадцать восьмое" to 28,
+            "двадцать седьмое" to 27,
+            "двадцать шестое" to 26,
+            "двадцать пятое" to 25,
+            "двадцать четвертое" to 24,
+            "двадцать третье" to 23,
+            "двадцать второе" to 22,
+            "двадцать первое" to 21,
+
+            "двадцатое" to 20,
+            "девятнадцатое" to 19,
+            "восемнадцатое" to 18,
+            "семнадцатое" to 17,
+            "шестнадцатое" to 16,
+            "пятнадцатое" to 15,
+            "четырнадцатое" to 14,
+            "тринадцатое" to 13,
+            "двенадцатое" to 12,
+            "одиннадцатое" to 11,
+            "десятое" to 10,
+
+            "девятое" to 9,
+            "восьмое" to 8,
+            "седьмое" to 7,
+            "шестое" to 6,
+            "пятое" to 5,
+            "четвертое" to 4,
+            "третье" to 3,
+            "второе" to 2,
+            "первое" to 1,
+
+            // запасные варианты (иногда распознаёт без “-ое”)
+            "один" to 1,
+            "два" to 2,
+            "три" to 3,
+            "четыре" to 4,
+            "пять" to 5,
+            "шесть" to 6,
+            "семь" to 7,
+            "восемь" to 8,
+            "девять" to 9,
+            "десять" to 10
+        ).sortedByDescending { it.first.length }
+
+        for ((k, v) in map) {
+            if (text.contains(k)) return v
+        }
+
+        return null
+    }
+
+
 }

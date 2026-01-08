@@ -13,8 +13,32 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.robert.mybank.R
 import com.robert.mybank.server.*
 import kotlinx.coroutines.*
+import android.content.Intent
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import java.text.Normalizer
+import java.util.Locale
+
 
 class ActivityProduct : AppCompatActivity() {
+    // ===== Voice =====
+    private var isListening = false
+    private var restartPosted = false
+    private var isUiModalOpen = false // bottomSheet/alert открыт -> не слушаем
+    private val restartDelayMs = 1500L
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var recognizerIntent: Intent? = null
+
+    private val voiceHandler = Handler(Looper.getMainLooper())
+
+
+    private var lastVoiceTriggerAt = 0L
+    private val voiceCooldownMs = 1200L
+    private var voiceEnabled = true
 
     private lateinit var rvCategories: RecyclerView
 
@@ -53,9 +77,185 @@ class ActivityProduct : AppCompatActivity() {
         rvCategories.adapter = categoriesAdapter
 
         loadCategories()
+        setupVoice()
+    }
+    override fun onResume() {
+        super.onResume()
+        voiceEnabled = true
+        scheduleRestartVoice(1200L) // не 800, чуть больше пауза = меньше “пиликанья”
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stopVoiceListening()
+    }
+
+    private fun setupVoice() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "Распознавание речи недоступно", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+
+        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false) // ВАЖНО: partial выключаем
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+
+            override fun onError(error: Int) {
+                isListening = false
+
+                // эти ошибки встречаются постоянно — не надо “долбить” сервис
+                val delay = when (error) {
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 3000L
+                    SpeechRecognizer.ERROR_NO_MATCH -> 2000L
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 2000L
+                    else -> restartDelayMs
+                }
+                scheduleRestartVoice(delay)
+            }
+
+            override fun onResults(results: Bundle?) {
+                isListening = false
+                handleVoiceResults(results)
+
+                // после успешного распознавания даём паузу, чтобы не было “кликов”
+                scheduleRestartVoice(1800L)
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                // ничего (иначе будет дёргаться часто)
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+
+
+    private fun startVoiceListening() {
+        if (!voiceEnabled) return
+        if (isUiModalOpen) return
+        if (isListening) return
+        Log.d("VOICE", "START in ActivityProduct")
+
+        val sr = speechRecognizer ?: return
+        val intent = recognizerIntent ?: return
+
+        try {
+            // ВАЖНО: сначала cancel, иначе на некоторых девайсах будет двойной старт/бип
+            sr.cancel()
+
+            isListening = true
+            sr.startListening(intent)
+        } catch (_: Throwable) {
+            isListening = false
+            scheduleRestartVoice(2000L)
+        }
+    }
+
+
+    private fun stopVoiceListening() {
+        voiceHandler.removeCallbacksAndMessages(null)
+        restartPosted = false
+
+        try {
+            isListening = false
+            speechRecognizer?.cancel() // только cancel, stopListening иногда даёт лишний звук
+        } catch (_: Throwable) {}
+    }
+
+
+    private fun scheduleRestartVoice(delayMs: Long = restartDelayMs) {
+        if (!voiceEnabled) return
+        if (restartPosted) return
+
+        restartPosted = true
+        voiceHandler.removeCallbacksAndMessages(null)
+
+        voiceHandler.postDelayed({
+            restartPosted = false
+            if (!isFinishing && !isDestroyed) startVoiceListening()
+        }, delayMs)
+    }
+
+
+    private fun normalizeRu(s: String): String {
+        // нижний регистр, убираем ё->е, убираем знаки/лишние пробелы
+        val low = s.lowercase(Locale.getDefault()).replace('ё', 'е')
+        val noPunct = low.replace(Regex("""[^\p{L}\p{Nd}\s]"""), " ")
+        return noPunct.trim().replace(Regex("""\s+"""), " ")
+    }
+
+    private fun findCategoryByVoice(textNorm: String): CategoryDto? {
+        if (categories.isEmpty()) return null
+
+        // 1) точное совпадение
+        categories.firstOrNull { normalizeRu(it.name) == textNorm }?.let { return it }
+
+        // 2) если фраза длиннее (например "открой продукты") — ищем вхождение названия категории
+        // сортируем по длине, чтобы "продукты" не перебило "продукты для дома" (если появится)
+        val sorted = categories.sortedByDescending { it.name.length }
+        for (c in sorted) {
+            val n = normalizeRu(c.name)
+            if (n.isNotBlank() && textNorm.contains(n)) return c
+        }
+
+        return null
+    }
+    private fun handleVoiceResults(bundle: Bundle?) {
+        val list = bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+        val raw = list.firstOrNull().orEmpty()
+        val text = normalizeRu(raw)
+
+        if (text.isBlank()) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastVoiceTriggerAt < voiceCooldownMs) return
+
+        // Команды
+        when {
+            text.contains("доход") -> {
+                lastVoiceTriggerAt = now
+                openIncomeSheet()
+                return
+            }
+            text.contains("добавить") && text.contains("категор") -> {
+                lastVoiceTriggerAt = now
+                showAddCategoryDialog()
+                return
+            }
+            text == "назад" || text.contains("назад") -> {
+                lastVoiceTriggerAt = now
+                finish()
+                return
+            }
+        }
+
+        // Категория по названию
+        val cat = findCategoryByVoice(text)
+        if (cat != null) {
+            lastVoiceTriggerAt = now
+            openEntriesSheet(cat)
+            return
+        }
+
+        // если не нашли — ничего не делаем
     }
 
     private fun openIncomeSheet() {
+        isUiModalOpen = true
+        stopVoiceListening()
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(R.layout.bottom_sheet_entries)
 
@@ -63,7 +263,14 @@ class ActivityProduct : AppCompatActivity() {
         val rv = dialog.findViewById<RecyclerView>(R.id.rvEntries)
 
         tvTitle?.text = "Доход"
-        if (rv == null) { dialog.show(); return }
+        if (rv == null) {
+            dialog.setOnDismissListener {
+                isUiModalOpen = false
+                scheduleRestartVoice(1200L)
+            }
+            dialog.show()
+            return
+        }
 
         val day = intent.getStringExtra("date") ?: ""
         if (day.isBlank()) { Toast.makeText(this, "Нет даты", Toast.LENGTH_SHORT).show(); dialog.show(); return }
@@ -113,6 +320,8 @@ class ActivityProduct : AppCompatActivity() {
 
         // SAVE on dismiss
         dialog.setOnDismissListener {
+            isUiModalOpen = false
+            scheduleRestartVoice(800L)
             val filled = entries.filter { it.name.isNotBlank() && it.value.isNotBlank() }
 
             // 1) NEW -> POST batch
@@ -248,8 +457,10 @@ class ActivityProduct : AppCompatActivity() {
 
     private fun showAddCategoryDialog() {
         val input = EditText(this).apply { hint = "Название категории" }
+        isUiModalOpen = true
+        stopVoiceListening()
 
-        AlertDialog.Builder(this)
+        val d =  AlertDialog.Builder(this)
             .setTitle("Добавление категории")
             .setView(input)
             .setNegativeButton("Отмена", null)
@@ -261,11 +472,19 @@ class ActivityProduct : AppCompatActivity() {
                     Toast.makeText(this, "Введите название", Toast.LENGTH_SHORT).show()
                 }
             }
-            .show()
+            .create()
+        d.setOnDismissListener {
+            isUiModalOpen = false
+            scheduleRestartVoice(800L)
+        }
+        d.show()
     }
 
 
     private fun openEntriesSheet(category: CategoryDto) {
+        isUiModalOpen = true
+        stopVoiceListening()
+
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(R.layout.bottom_sheet_entries)
 
@@ -342,6 +561,9 @@ class ActivityProduct : AppCompatActivity() {
 
         // 2) СОХРАНЕНИЕ новых строк при закрытии
         dialog.setOnDismissListener {
+            isUiModalOpen = false
+            scheduleRestartVoice(800L)
+
             val newRows = entries
                 .drop(loadedCount) // только добавленные после загрузки
                 .filter { it.name.isNotBlank() && it.value.isNotBlank() }
@@ -423,7 +645,14 @@ class ActivityProduct : AppCompatActivity() {
 
 
     override fun onDestroy() {
+        stopVoiceListening()
         super.onDestroy()
         uiScope.cancel()
+
+        voiceEnabled = false
+        voiceHandler.removeCallbacksAndMessages(null)
+        speechRecognizer?.destroy()
+        speechRecognizer = null
     }
+
 }
